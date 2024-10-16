@@ -1020,6 +1020,31 @@ impl GlobalContext {
         unstable_flags: &[String],
         cli_config: &[String],
     ) -> CargoResult<()> {
+        for warning in self
+            .unstable_flags
+            .parse(unstable_flags, self.nightly_features_allowed)?
+        {
+            self.shell().warn(warning)?;
+        }
+        if !unstable_flags.is_empty() {
+            // store a copy of the cli flags separately for `load_unstable_flags_from_config`
+            // (we might also need it again for `reload_rooted_at`)
+            self.unstable_flags_cli = Some(unstable_flags.to_vec());
+        }
+        if !cli_config.is_empty() {
+            self.cli_config = Some(cli_config.iter().map(|s| s.to_string()).collect());
+            self.merge_cli_args()?;
+        }
+        if self.unstable_flags.config_include {
+            // If the config was already loaded (like when fetching the
+            // `[alias]` table), it was loaded with includes disabled because
+            // the `unstable_flags` hadn't been set up, yet. Any values
+            // fetched before this step will not process includes, but that
+            // should be fine (`[alias]` is one of the only things loaded
+            // before configure). This can be removed when stabilized.
+            self.reload_rooted_at(self.cwd.clone())?;
+        }
+
         // Ignore errors in the configuration files. We don't want basic
         // commands like `cargo version` to error out due to config file
         // problems.
@@ -1065,31 +1090,6 @@ impl GlobalContext {
                 .unwrap_or(false);
         let cli_target_dir = target_dir.as_ref().map(|dir| Filesystem::new(dir.clone()));
         self.target_dir = cli_target_dir;
-
-        for warning in self
-            .unstable_flags
-            .parse(unstable_flags, self.nightly_features_allowed)?
-        {
-            self.shell().warn(warning)?;
-        }
-        if !unstable_flags.is_empty() {
-            // store a copy of the cli flags separately for `load_unstable_flags_from_config`
-            // (we might also need it again for `reload_rooted_at`)
-            self.unstable_flags_cli = Some(unstable_flags.to_vec());
-        }
-        if !cli_config.is_empty() {
-            self.cli_config = Some(cli_config.iter().map(|s| s.to_string()).collect());
-            self.merge_cli_args()?;
-        }
-        if self.unstable_flags.config_include {
-            // If the config was already loaded (like when fetching the
-            // `[alias]` table), it was loaded with includes disabled because
-            // the `unstable_flags` hadn't been set up, yet. Any values
-            // fetched before this step will not process includes, but that
-            // should be fine (`[alias]` is one of the only things loaded
-            // before configure). This can be removed when stabilized.
-            self.reload_rooted_at(self.cwd.clone())?;
-        }
 
         self.load_unstable_flags_from_config()?;
 
@@ -2030,6 +2030,10 @@ impl ConfigError {
         }
     }
 
+    fn is_missing_field(&self) -> bool {
+        self.error.downcast_ref::<MissingField>().is_some()
+    }
+
     fn missing(key: &ConfigKey) -> ConfigError {
         ConfigError {
             error: anyhow!("missing config key `{}`", key),
@@ -2037,11 +2041,11 @@ impl ConfigError {
         }
     }
 
-    fn with_key_context(self, key: &ConfigKey, definition: Definition) -> ConfigError {
+    fn with_key_context(self, key: &ConfigKey, definition: Option<Definition>) -> ConfigError {
         ConfigError {
             error: anyhow::Error::from(self)
                 .context(format!("could not load config key `{}`", key)),
-            definition: Some(definition),
+            definition: definition,
         }
     }
 }
@@ -2062,10 +2066,28 @@ impl fmt::Display for ConfigError {
     }
 }
 
+#[derive(Debug)]
+struct MissingField(String);
+
+impl fmt::Display for MissingField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "missing field `{}`", self.0)
+    }
+}
+
+impl std::error::Error for MissingField {}
+
 impl serde::de::Error for ConfigError {
     fn custom<T: fmt::Display>(msg: T) -> Self {
         ConfigError {
             error: anyhow::Error::msg(msg.to_string()),
+            definition: None,
+        }
+    }
+
+    fn missing_field(field: &'static str) -> Self {
+        ConfigError {
+            error: anyhow::Error::new(MissingField(field.to_string())),
             definition: None,
         }
     }
@@ -2111,6 +2133,16 @@ impl fmt::Debug for ConfigValue {
 }
 
 impl ConfigValue {
+    fn get_definition(&self) -> &Definition {
+        match self {
+            CV::Boolean(_, def)
+            | CV::Integer(_, def)
+            | CV::String(_, def)
+            | CV::List(_, def)
+            | CV::Table(_, def) => def,
+        }
+    }
+
     fn from_toml(def: Definition, toml: toml::Value) -> CargoResult<ConfigValue> {
         match toml {
             toml::Value::String(val) => Ok(CV::String(val, def)),

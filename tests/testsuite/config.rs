@@ -5,7 +5,9 @@ use cargo::util::context::{
     self, Definition, GlobalContext, JobsConfig, SslVersionConfig, StringList,
 };
 use cargo::CargoResult;
-use cargo_test_support::compare;
+use cargo_test_support::compare::assert_e2e;
+use cargo_test_support::prelude::*;
+use cargo_test_support::str;
 use cargo_test_support::{paths, project, symlink_supported, t};
 use cargo_util_schemas::manifest::TomlTrimPaths;
 use cargo_util_schemas::manifest::TomlTrimPathsValue;
@@ -208,7 +210,7 @@ fn rename_config_toml_to_config_replacing_with_symlink() {
 }
 
 #[track_caller]
-pub fn assert_error<E: Borrow<anyhow::Error>>(error: E, msgs: &str) {
+pub fn assert_error<E: Borrow<anyhow::Error>>(error: E, msgs: impl IntoData) {
     let causes = error
         .borrow()
         .chain()
@@ -222,7 +224,7 @@ pub fn assert_error<E: Borrow<anyhow::Error>>(error: E, msgs: &str) {
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    compare::assert_match_exact(msgs, &causes);
+    assert_e2e().eq(&causes, msgs);
 }
 
 #[cargo_test]
@@ -287,10 +289,12 @@ f1 = 1
 
     // It should NOT have warned for the symlink.
     let output = read_output(gctx);
-    let expected = "\
+    let expected = str![[r#"
 [WARNING] `[ROOT]/.cargo/config` is deprecated in favor of `config.toml`
-[NOTE] if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`";
-    compare::assert_match_exact(expected, &output);
+[NOTE] if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+
+"#]];
+    assert_e2e().eq(&output, expected);
 }
 
 #[cargo_test]
@@ -316,7 +320,7 @@ f1 = 1
 
     // It should NOT have warned for the symlink.
     let output = read_output(gctx);
-    compare::assert_match_exact("", &output);
+    assert_e2e().eq(&output, str![[""]]);
 }
 
 #[cargo_test]
@@ -342,7 +346,7 @@ f1 = 1
 
     // It should NOT have warned for the symlink.
     let output = read_output(gctx);
-    compare::assert_match_exact("", &output);
+    assert_e2e().eq(&output, str![[""]]);
 }
 
 #[cargo_test]
@@ -368,7 +372,7 @@ f1 = 1
 
     // It should NOT have warned for this situation.
     let output = read_output(gctx);
-    compare::assert_match_exact("", &output);
+    assert_e2e().eq(&output, str![[""]]);
 }
 
 #[cargo_test]
@@ -395,10 +399,11 @@ f1 = 2
 
     // But it also should have warned.
     let output = read_output(gctx);
-    let expected = "\
-[WARNING] both `[..]/.cargo/config` and `[..]/.cargo/config.toml` exist. Using `[..]/.cargo/config`
-";
-    compare::assert_match_exact(expected, &output);
+    let expected = str![[r#"
+[WARNING] both `[ROOT]/.cargo/config` and `[ROOT]/.cargo/config.toml` exist. Using `[ROOT]/.cargo/config`
+
+"#]];
+    assert_e2e().eq(&output, expected);
 }
 
 #[cargo_test]
@@ -429,10 +434,11 @@ unused = 456
 
     // Verify the warnings.
     let output = read_output(gctx);
-    let expected = "\
-warning: unused config key `S.unused` in `[..]/.cargo/config.toml`
-";
-    compare::assert_match_exact(expected, &output);
+    let expected = str![[r#"
+[WARNING] unused config key `S.unused` in `[ROOT]/.cargo/config.toml`
+
+"#]];
+    assert_e2e().eq(&output, expected);
 }
 
 #[cargo_test]
@@ -824,7 +830,8 @@ Caused by:
   |
 1 | asdf
   |     ^
-expected `.`, `=`",
+expected `.`, `=`
+",
     );
 }
 
@@ -1454,7 +1461,6 @@ fn struct_with_overlapping_inner_struct_and_defaults() {
     // If, in the future, we can handle this more correctly, feel free to delete
     // this case.
     #[derive(Deserialize, Default)]
-    #[serde(default)]
     struct PrefixContainer {
         inn: bool,
         inner: Inner,
@@ -1466,7 +1472,7 @@ fn struct_with_overlapping_inner_struct_and_defaults() {
         .get::<PrefixContainer>("prefixcontainer")
         .err()
         .unwrap();
-    assert!(format!("{}", err).contains("missing config key `prefixcontainer.inn`"));
+    assert!(format!("{}", err).contains("missing field `inn`"));
     let gctx = GlobalContextBuilder::new()
         .env("CARGO_PREFIXCONTAINER_INNER_VALUE", "12")
         .env("CARGO_PREFIXCONTAINER_INN", "true")
@@ -1474,6 +1480,22 @@ fn struct_with_overlapping_inner_struct_and_defaults() {
     let f: PrefixContainer = gctx.get("prefixcontainer").unwrap();
     assert_eq!(f.inner.value, 12);
     assert_eq!(f.inn, true);
+
+    // Use default attribute of serde, then we can skip setting the inn field
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct PrefixContainerFieldDefault {
+        inn: bool,
+        inner: Inner,
+    }
+    let gctx = GlobalContextBuilder::new()
+        .env("CARGO_PREFIXCONTAINER_INNER_VALUE", "12")
+        .build();
+    let f = gctx
+        .get::<PrefixContainerFieldDefault>("prefixcontainer")
+        .unwrap();
+    assert_eq!(f.inner.value, 12);
+    assert_eq!(f.inn, false);
 
     // Containing struct where the inner value's field is a prefix of another
     //
@@ -1630,7 +1652,7 @@ fn all_profile_options() {
     let profile_toml = toml::to_string(&profile).unwrap();
     let roundtrip: cargo_toml::TomlProfile = toml::from_str(&profile_toml).unwrap();
     let roundtrip_toml = toml::to_string(&roundtrip).unwrap();
-    compare::assert_match_exact(&profile_toml, &roundtrip_toml);
+    assert_e2e().eq(&roundtrip_toml, &profile_toml);
 }
 
 #[cargo_test]
@@ -1862,4 +1884,49 @@ fn trim_paths_parsing() {
         .build();
     let trim_paths: TomlTrimPaths = gctx.get("profile.dev.trim-paths").unwrap();
     assert_eq!(trim_paths, expected, "failed to parse {val}");
+}
+
+#[cargo_test]
+fn missing_fields() {
+    #[derive(Deserialize, Default, Debug)]
+    struct Foo {
+        bar: Bar,
+    }
+
+    #[derive(Deserialize, Default, Debug)]
+    struct Bar {
+        bax: bool,
+        baz: bool,
+    }
+
+    let gctx = GlobalContextBuilder::new()
+        .env("CARGO_FOO_BAR_BAZ", "true")
+        .build();
+    assert_error(
+        gctx.get::<Foo>("foo").unwrap_err(),
+        "\
+could not load config key `foo.bar`
+
+Caused by:
+  missing field `bax`",
+    );
+    let gctx: GlobalContext = GlobalContextBuilder::new()
+        .env("CARGO_FOO_BAR_BAZ", "true")
+        .env("CARGO_FOO_BAR_BAX", "true")
+        .build();
+    let foo = gctx.get::<Foo>("foo").unwrap();
+    assert_eq!(foo.bar.bax, true);
+    assert_eq!(foo.bar.baz, true);
+
+    let gctx: GlobalContext = GlobalContextBuilder::new()
+        .config_arg("foo.bar.baz=true")
+        .build();
+    assert_error(
+        gctx.get::<Foo>("foo").unwrap_err(),
+        "\
+error in --config cli option: could not load config key `foo.bar`
+
+Caused by:
+  missing field `bax`",
+    );
 }

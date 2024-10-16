@@ -1,10 +1,11 @@
 //! Tests for the `cargo fix` command.
 
 use cargo::core::Edition;
-use cargo_test_support::compare::assert_match_exact;
+use cargo_test_support::compare::assert_e2e;
 use cargo_test_support::git::{self, init};
 use cargo_test_support::paths::{self, CargoPathExt};
 use cargo_test_support::registry::{Dependency, Package};
+use cargo_test_support::str;
 use cargo_test_support::tools;
 use cargo_test_support::{basic_manifest, is_nightly, project};
 
@@ -16,7 +17,7 @@ fn do_not_fix_broken_builds() {
             r#"
                 pub fn foo() {
                     let mut x = 3;
-                    drop(x);
+                    let _ = x;
                 }
 
                 pub fn foo2() {
@@ -427,7 +428,7 @@ fn fix_deny_warnings() {
         .file(
             "src/lib.rs",
             "#![deny(warnings)]
-             pub fn foo() { let mut x = 3; drop(x); }
+             pub fn foo() { let mut x = 3; let _ = x; }
             ",
         )
         .build();
@@ -503,25 +504,25 @@ fn fix_two_files() {
 #[cargo_test]
 fn fixes_missing_ampersand() {
     let p = project()
-        .file("src/main.rs", "fn main() { let mut x = 3; drop(x); }")
+        .file("src/main.rs", "fn main() { let mut x = 3; let _ = x; }")
         .file(
             "src/lib.rs",
             r#"
-                pub fn foo() { let mut x = 3; drop(x); }
+                pub fn foo() { let mut x = 3; let _ = x; }
 
                 #[test]
-                pub fn foo2() { let mut x = 3; drop(x); }
+                pub fn foo2() { let mut x = 3; let _ = x; }
             "#,
         )
         .file(
             "tests/a.rs",
             r#"
                 #[test]
-                pub fn foo() { let mut x = 3; drop(x); }
+                pub fn foo() { let mut x = 3; let _ = x; }
             "#,
         )
-        .file("examples/foo.rs", "fn main() { let mut x = 3; drop(x); }")
-        .file("build.rs", "fn main() { let mut x = 3; drop(x); }")
+        .file("examples/foo.rs", "fn main() { let mut x = 3; let _ = x; }")
+        .file("build.rs", "fn main() { let mut x = 3; let _ = x; }")
         .build();
 
     p.cargo("fix --all-targets --allow-no-vcs")
@@ -701,8 +702,8 @@ fn does_not_warn_about_dirty_ignored_files() {
 #[cargo_test]
 fn fix_all_targets_by_default() {
     let p = project()
-        .file("src/lib.rs", "pub fn foo() { let mut x = 3; drop(x); }")
-        .file("tests/foo.rs", "pub fn foo() { let mut x = 3; drop(x); }")
+        .file("src/lib.rs", "pub fn foo() { let mut x = 3; let _ = x; }")
+        .file("tests/foo.rs", "pub fn foo() { let mut x = 3; let _ = x; }")
         .build();
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
@@ -1280,7 +1281,7 @@ fn fix_to_broken_code() {
             "#,
         )
         .file("bar/build.rs", "fn main() {}")
-        .file("bar/src/lib.rs", "pub fn foo() { let mut x = 3; drop(x); }")
+        .file("bar/src/lib.rs", "pub fn foo() { let mut x = 3; let _ = x; }")
         .build();
 
     // Build our rustc shim
@@ -1296,7 +1297,7 @@ fn fix_to_broken_code() {
 
     assert_eq!(
         p.read_file("bar/src/lib.rs"),
-        "pub fn foo() { let x = 3; drop(x); }"
+        "pub fn foo() { let x = 3; let _ = x; }"
     );
 }
 
@@ -1537,9 +1538,9 @@ fn fix_shared_cross_workspace() {
         )
         .run();
 
-    assert_match_exact(
-        "pub fn fixme(_x: Box<&dyn Fn() -> ()>) {}",
+    assert_e2e().eq(
         &p.read_file("foo/src/shared.rs"),
+        str!["pub fn fixme(_x: Box<&dyn Fn() -> ()>) {}"],
     );
 }
 

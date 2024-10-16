@@ -2265,7 +2265,7 @@ supported tools: {}",
         if tool == "cargo" && !gctx.cli_unstable().cargo_lints {
             warn_for_cargo_lint_feature(gctx, warnings);
         }
-        for name in lints.keys() {
+        for (name, config) in lints {
             if let Some((prefix, suffix)) = name.split_once("::") {
                 if tool == prefix {
                     anyhow::bail!(
@@ -2277,6 +2277,19 @@ supported tools: {}",
                     )
                 } else {
                     anyhow::bail!("`lints.{tool}.{name}` is not a valid lint name")
+                }
+            } else if let Some(config) = config.config() {
+                for config_name in config.keys() {
+                    // manually report unused manifest key warning since we collect all the "extra"
+                    // keys and values inside the config table
+                    //
+                    // except for `rust.unexpected_cfgs.check-cfg` which is used by rustc/rustdoc
+                    if !(tool == "rust" && name == "unexpected_cfgs" && config_name == "check-cfg")
+                    {
+                        let message =
+                            format!("unused manifest key: `lints.{tool}.{name}.{config_name}`");
+                        warnings.push(message);
+                    }
                 }
             }
         }
@@ -2764,6 +2777,11 @@ fn prepare_targets_for_publish(
         };
         prepared.push(target);
     }
+    // Ensure target order is deterministic, particularly for `cargo vendor` where re-vendoring
+    // shuld not cause changes.
+    //
+    // `unstable` should be deterministic because we enforce that `t.name` is unique
+    prepared.sort_unstable_by_key(|t| t.name.clone());
 
     if prepared.is_empty() {
         Ok(None)

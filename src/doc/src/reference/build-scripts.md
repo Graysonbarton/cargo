@@ -258,31 +258,15 @@ identifier, the value should be a string.
 
 ### `cargo::rustc-check-cfg=CHECK_CFG` {#rustc-check-cfg}
 
-*See the announcement [blog post][check-cfg-blog-post] for more a global view of the feature.*
-
 Add to the list of expected config names and values that is used when checking
-the _reachable_ cfg expressions.
+the _reachable_ cfg expressions with the [`unexpected_cfgs`][unexpected-cfgs] lint.
 
-For details on the syntax of `CHECK_CFG`, see `rustc` [`--check-cfg` flag][option-check-cfg].
-See also the [`unexpected_cfgs`][unexpected-cfgs] lint.
+The syntax of `CHECK_CFG` mirrors the `rustc` [`--check-cfg` flag][option-check-cfg], see
+[Checking conditional configurations][checking-conditional-configurations] for more details.
 
 > Note: `cargo:rustc-check-cfg` (single-colon) can be used if your MSRV is below Rust 1.77
 
 The instruction can be used like this:
-
-```rust,no_run
-// build.rs
-println!("cargo::rustc-check-cfg=cfg(foo, values(\"bar\"))");
-```
-
-Note that all possible cfgs should be defined, regardless of which cfgs are
-currently enabled. This includes all possible values of a given cfg name.
-
-It is recommended to group the `cargo::rustc-check-cfg` and
-[`cargo::rustc-cfg`][option-cfg] instructions as closely as possible in order to
-avoid typos, missing check-cfg, stalled cfgs...
-
-#### Example of using `cargo::rustc-check-cfg` and `cargo::rustc-cfg` together
 
 ```rust,no_run
 // build.rs
@@ -292,38 +276,18 @@ if foo_bar_condition {
 }
 ```
 
-##### Example of local-only `build.rs`/build script
+Note that all possible cfgs should be defined, regardless of which cfgs are
+currently enabled. This includes all possible values of a given cfg name.
 
-Build scripts can impose costs on downstream users, and crate authors who wish to avoid
-this can use "local-only" build scripts, which are active locally but not packaged in the
-distributed package. Completly removing the cost from downstream users. 
+It is recommended to group the `cargo::rustc-check-cfg` and
+[`cargo::rustc-cfg`][option-cfg] instructions as closely as possible in order to
+avoid typos, missing check-cfg, stale cfgs...
 
-The way to achieved this, is by excluding the `build.rs` in the `Cargo.toml` with the
-`exclude` key:
+See also the
+[conditional compilation][conditional-compilation-example] example.
 
-```diff
-  [package]
-  name = "foo"
-  version = "0.1.0"
-+ exclude = ["build.rs"]
-```
-
-*`build.rs`:*
-```rust
-fn main() {
-    // Warning: build.rs is not published to crates.io.
-
-    println!("cargo::rerun-if-changed=build.rs");
-    println!("cargo::rustc-check-cfg=cfg(foo)");
-}
-```
-
-For a more complete example see in the [build script examples][build-script-examples] page
-the [conditional compilation][conditional-compilation-example] example.
-
-[check-cfg-blog-post]: https://blog.rust-lang.org/2024/05/06/check-cfg.html
+[checking-conditional-configurations]: ../../rustc/check-cfg.html
 [option-check-cfg]: ../../rustc/command-line-arguments.md#option-check-cfg
-[build-script-examples]: build-script-examples.md
 [conditional-compilation-example]: build-script-examples.md#conditional-compilation
 
 ### `cargo::rustc-env=VAR=VALUE` {#rustc-env}
